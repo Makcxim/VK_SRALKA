@@ -4,8 +4,7 @@ from typing import List, Optional
 
 import openai
 from decouple import config
-from vkbottle import PhotoMessageUploader, ABCHTTPClient
-from vkbottle.api import API
+from vkbottle import ABCHTTPClient, PhotoMessageUploader
 from vkbottle.bot import BotLabeler, Message
 from vkbottle.user import User
 
@@ -18,7 +17,7 @@ admin_chat_id = config('VK_ADMIN_CHAT_ID', default=0)
 
 async def walls_checker(group_id: int, count: int = 1) -> str:
     group_id = validate_group_id(group_id)
-    wall_post = await api.wall.get(owner_id=group_id, count=count, extended=False)
+    wall_post = await user.api.wall.get(owner_id=group_id, count=count, extended=False)
     delim = '\n'
     answer = f'{wall_post.items[0].id}:\n{wall_post.items[0].text + (delim if wall_post.items[0].text else None) + wall_post.items[0].copy_history[0].text if wall_post.items[0].copy_history else ''}'
     return answer
@@ -35,7 +34,7 @@ async def attachments_uploader(
     photo_attachments = [attachment.photo for attachment in message if attachment.photo]
 
     if photo_attachments:
-        uploader = PhotoMessageUploader(api=api, generate_attachment_strings=True)
+        uploader = PhotoMessageUploader(api=user.api, generate_attachment_strings=True)
         for photo in photo_attachments:
             url = photo.sizes[-1].url
             bytes_photo = await http_client.request_content(url=url)
@@ -52,7 +51,7 @@ async def manual_attachment_uploader_test(message: Message, group_id: int = 0):
     group_id = validate_group_id(group_id)
 
     try:
-        wall_data = await api.wall.get(owner_id=group_id, count=1, extended=False)
+        wall_data = await user.api.wall.get(owner_id=group_id, count=1, extended=False)
         attachments = await attachments_uploader(
             api_wall_data=wall_data, peer_id=message.peer_id, http_client=message.ctx_api.http_client
         )
@@ -60,7 +59,7 @@ async def manual_attachment_uploader_test(message: Message, group_id: int = 0):
     except Exception as e:
         await asyncio.sleep(5 + random_delay(0, 3))
         await message.answer(f'Error: {e}')
-        wall_data = await api.wall.get(owner_id=group_id, count=1, extended=False)
+        wall_data = await user.api.wall.get(owner_id=group_id, count=1, extended=False)
         attachments = await attachments_uploader(
             api_wall_data=wall_data, peer_id=message.peer_id, http_client=message.ctx_api.http_client
         )
@@ -112,10 +111,10 @@ async def loop_walls_checker(groups_list: list = None) -> None:
     print('Start loop_walls_checker')
     for group_id in groups_list:
         try:
-            wall_post = await api.wall.get(owner_id=group_id, count=1, extended=True)
+            wall_post = await user.api.wall.get(owner_id=group_id, count=1, extended=True)
 
             if wall_post.items[0].is_pinned:
-                wall_post = await api.wall.get(owner_id=group_id, count=1, offset=1, extended=True)
+                wall_post = await user.api.wall.get(owner_id=group_id, count=1, offset=1, extended=True)
 
             post_id = wall_post.items[0].id
             groups_data = json.loads(open('groups.json', 'r', encoding='utf-8').read())
@@ -175,7 +174,10 @@ async def loop_walls_checker(groups_list: list = None) -> None:
                     )
 
                 if config('VK_COMMENT_MODE', '') or group_id == config('VK_TEST_GROUP_ID', default=0):
-                    await user.api.wall.create_comment(owner_id=group_id, post_id=post_id, message='👍')
+                    if ai_answer != 'Ok!':
+                        await user.api.wall.create_comment(owner_id=group_id, post_id=post_id, message=ai_answer)
+                    else:
+                        await user.api.wall.create_comment(owner_id=group_id, post_id=post_id, message='👍')
 
         except Exception as e:
             await asyncio.sleep(5 + random_delay(0, 3))
@@ -202,10 +204,8 @@ if __name__ == '__main__':
     create_if_not_exists_groups_json()
 
     token = config('VK_TOKEN', default='')
-    access_token = config('VK_ACCESS_TOKEN', default='')
     openai.api_key = config('OPENAI_API_KEY', default='')
 
-    api = API(access_token)
     user = User(token)
 
     user.loop_wrapper.add_task(set_http_client(user))
